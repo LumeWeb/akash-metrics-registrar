@@ -87,6 +87,7 @@ func (a *App) setupServiceGroup() error {
 
 	spec := types.ServiceGroupSpec{
 		CommonLabels: a.cfg.CustomLabels,
+		Password:     a.cfg.Password,
 	}
 
 	if err := group.Configure(spec); err != nil {
@@ -127,9 +128,6 @@ func (a *App) checkHealth() error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if a.cfg.TargetAuth != "" {
-		req.Header.Set("Authorization", "Basic "+a.cfg.TargetAuth)
-	}
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {

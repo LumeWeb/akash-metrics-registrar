@@ -15,10 +15,10 @@ type Config struct {
 
 	// Target exporter configuration
 	TargetURL      string
-	TargetAuth     string
 	ServiceName    string
 	CustomLabels   map[string]string
 	RegistrationTTL time.Duration
+	Password       string // Password for basic auth, used in ServiceGroupSpec
 
 	// Optional settings
 	RetryAttempts int

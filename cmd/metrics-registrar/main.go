@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"github.com/urfave/cli/v3"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/build"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/logger"
+	"go.lumeweb.com/akash-metrics-registrar/pkg/proxy"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/registrar"
 	"os"
 	"time"
@@ -41,16 +43,17 @@ func main() {
 				Usage:   "Port of the target service",
 				Sources: cli.EnvVars("TARGET_PORT"),
 			},
+			&cli.IntFlag{
+				Name:    "proxy-port",
+				Value:   8080,
+				Usage:   "Port for the proxy server",
+				Sources: cli.EnvVars("PROXY_PORT"),
+			},
 			&cli.StringFlag{
 				Name:     "service-name",
 				Usage:    "Name of the service for registration",
 				Required: true,
 				Sources:  cli.EnvVars("SERVICE_NAME"),
-			},
-			&cli.StringFlag{
-				Name:    "target-auth",
-				Usage:   "Basic auth credentials for target URL",
-				Sources: cli.EnvVars("TARGET_METRICS_AUTH"),
 			},
 			&cli.StringFlag{
 				Name:     "etcd-endpoints",
@@ -98,6 +101,12 @@ func main() {
 				Sources: cli.EnvVars("RETRY_DELAY"),
 			},
 			&cli.StringFlag{
+				Name:     "metrics-password",
+				Usage:    "Password for metrics basic auth",
+				Required: true,
+				Sources:  cli.EnvVars("METRICS_PASSWORD"),
+			},
+			&cli.StringFlag{
 				Name:    "custom-labels",
 				Usage:   "JSON string of custom labels",
 				Sources: cli.EnvVars("CUSTOM_LABELS"),
@@ -132,7 +141,6 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	cfg := &registrar.Config{
 		TargetURL:       targetURL,
 		ServiceName:     cmd.String("service-name"),
-		TargetAuth:      cmd.String("target-auth"),
 		EtcdEndpoints:   []string{cmd.String("etcd-endpoints")},
 		EtcdPrefix:      cmd.String("etcd-prefix"),
 		EtcdUsername:    cmd.String("etcd-username"),
@@ -142,6 +150,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		RetryAttempts:   int(cmd.Int("retry-attempts")),
 		RetryDelay:      cmd.Duration("retry-delay"),
 		CustomLabels:    customLabels,
+		Password:        cmd.String("metrics-password"),
 	}
 
 	// Create new registrar app
@@ -149,6 +158,52 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to create app: %w", err)
 	}
+
+	// Setup proxy
+	proxyConfig := proxy.Config{
+		TargetURL:     targetURL,
+		FlushInterval: 5 * time.Second,
+	}
+
+	reverseProxy, err := proxy.NewMetricsProxy(proxyConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create proxy: %w", err)
+	}
+
+	// Setup HTTP server with proxy
+	proxyAddr := fmt.Sprintf(":%d", cmd.Int("proxy-port"))
+	server := &http.Server{
+		Addr:    proxyAddr,
+		Handler: proxy.WithBasicAuth(reverseProxy, cfg.TargetAuth),
+	}
+
+	// Handle Akash port mapping for registration
+	registrationPort := fmt.Sprintf("%d", cmd.Int("proxy-port"))
+	akashPortVar := fmt.Sprintf("AKASH_EXTERNAL_PORT_%d", cmd.Int("proxy-port"))
+	if akashPort := os.Getenv(akashPortVar); akashPort != "" {
+		logger.Log.Infof("Found Akash external port mapping: %s - will use for registration", akashPort)
+		registrationPort = akashPort
+	}
+
+	// Get Akash ingress host if available
+	akashIngressHost := os.Getenv("AKASH_INGRESS_HOST")
+	if akashIngressHost == "" {
+		akashIngressHost = "localhost"
+	}
+
+	// Update registration URL to use proxy address with Akash configuration
+	cfg.TargetURL = fmt.Sprintf("http://%s:%s%s",
+		akashIngressHost,
+		registrationPort,
+		cmd.String("target-path"),
+	)
+
+	// Start HTTP server
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Log.Errorf("HTTP server error: %v", err)
+		}
+	}()
 
 	// Start the registration service
 	if err := app.Start(ctx); err != nil {
@@ -162,7 +217,12 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	// Initiate graceful shutdown
+	// Shutdown HTTP server
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Log.Errorf("HTTP server shutdown error: %v", err)
+	}
+
+	// Initiate graceful shutdown of registrar
 	if err := app.Shutdown(shutdownCtx); err != nil {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("shutdown error: %w", err)
