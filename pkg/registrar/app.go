@@ -24,6 +24,8 @@ type App struct {
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
+	regDone     <-chan struct{}
+	regErrChan  <-chan error
 }
 
 // NewApp creates a new registration service instance
@@ -103,17 +105,43 @@ func (a *App) startHealthCheck() {
 	go func() {
 		defer a.wg.Done()
 
-		ticker := time.NewTicker(a.cfg.RegistrationTTL / 2)
-		defer ticker.Stop()
+		// Initial registration
+		if err := a.performInitialRegistration(); err != nil {
+			logger.Log.Errorf("Initial registration failed: %v", err)
+			return
+		}
 
+		healthTicker := time.NewTicker(a.cfg.RegistrationTTL / 2)
+		defer healthTicker.Stop()
+
+		currentStatus := StatusHealthy
 		for {
 			select {
-			case <-ticker.C:
+			case <-healthTicker.C:
 				if err := a.checkHealth(); err != nil {
 					logger.Log.Errorf("Health check failed: %v", err)
-					a.updateStatus(StatusDegraded)
-				} else {
-					a.updateStatus(StatusHealthy)
+					if currentStatus != StatusDegraded {
+						if err := a.updateStatus(StatusDegraded); err != nil {
+							logger.Log.Errorf("Failed to update degraded status: %v", err)
+						}
+						currentStatus = StatusDegraded
+					}
+				} else if currentStatus != StatusHealthy {
+					if err := a.updateStatus(StatusHealthy); err != nil {
+						logger.Log.Errorf("Failed to update healthy status: %v", err)
+					}
+					currentStatus = StatusHealthy
+				}
+			case <-a.regDone:
+				// Registration expired, need to re-register
+				if err := a.performInitialRegistration(); err != nil {
+					logger.Log.Errorf("Re-registration failed: %v", err)
+				}
+			case err := <-a.regErrChan:
+				logger.Log.Errorf("Registration error: %v", err)
+				// Attempt to re-register after error
+				if err := a.performInitialRegistration(); err != nil {
+					logger.Log.Errorf("Re-registration failed: %v", err)
 				}
 			case <-a.ctx.Done():
 				return
@@ -142,6 +170,29 @@ func (a *App) checkHealth() error {
 	return nil
 }
 
+func (a *App) performInitialRegistration() error {
+	if err := a.etcdLimiter.Wait(a.ctx); err != nil {
+		return fmt.Errorf("rate limit exceeded: %w", err)
+	}
+
+	node := types.Node{
+		ID:           a.currentInfo.ID,
+		ExporterType: "metrics_exporter",
+		Labels:       a.currentInfo.Labels,
+		Status:       string(a.currentInfo.Status),
+		LastSeen:     time.Now(),
+	}
+
+	done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
+	if err != nil {
+		return fmt.Errorf("failed to register node: %w", err)
+	}
+
+	a.regDone = done
+	a.regErrChan = errChan
+	return nil
+}
+
 func (a *App) updateStatus(status ServiceStatus) error {
 	if err := a.etcdLimiter.Wait(a.ctx); err != nil {
 		return fmt.Errorf("rate limit exceeded: %w", err)
@@ -158,35 +209,14 @@ func (a *App) updateStatus(status ServiceStatus) error {
 		LastSeen:     time.Now(),
 	}
 
-	operation := func() error {
-		_, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
-		if err != nil {
-			return fmt.Errorf("failed to register node: %w", err)
-		}
-
-		select {
-		case err := <-errChan:
-			if err != nil {
-				return err
-			}
-		case <-a.ctx.Done():
-			return a.ctx.Err()
-		default:
-		}
-
-		return nil
+	done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
+	if err != nil {
+		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
-	retryConfig := util.RetryConfig{
-		InitialInterval:     a.cfg.RetryDelay,
-		MaxInterval:         a.cfg.RetryDelay * 2,
-		MaxElapsedTime:      a.cfg.RetryDelay * time.Duration(a.cfg.RetryAttempts),
-		RandomizationFactor: 0.2,
-	}
-	_, err := util.RetryOperation(func() (bool, error) {
-		return true, operation()
-	}, retryConfig, uint(a.cfg.RetryAttempts))
-	return err
+	a.regDone = done
+	a.regErrChan = errChan
+	return nil
 }
 
 // Shutdown gracefully stops the registration service
