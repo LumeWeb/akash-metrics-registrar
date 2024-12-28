@@ -3,8 +3,11 @@ package registrar
 import (
 	"context"
 	"fmt"
+	"go.lumeweb.com/akash-metrics-registrar/pkg/build"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/logger"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/util"
+	"os"
+	"strings"
 	etcdregistry "go.lumeweb.com/etcd-registry"
 	"go.lumeweb.com/etcd-registry/types"
 	"golang.org/x/time/rate"
@@ -175,10 +178,25 @@ func (a *App) performInitialRegistration() error {
 		return fmt.Errorf("rate limit exceeded: %w", err)
 	}
 
+	// Get Akash identifiers
+	ingressHost := os.Getenv("AKASH_INGRESS_HOST")
+	identifiers := util.GetNodeIdentifiers(ingressHost)
+
+	// Add standard Akash and version labels
+	labels := make(map[string]string)
+	for k, v := range a.currentInfo.Labels {
+		labels[k] = v
+	}
+	labels["version"] = build.Version
+	labels["git_commit"] = build.GitCommit
+	labels["deployment_id"] = identifiers.DeploymentID
+	labels["hash_id"] = identifiers.HashID
+	labels["ingress_host"] = ingressHost
+
 	node := types.Node{
 		ID:           a.currentInfo.ID,
 		ExporterType: "metrics_exporter",
-		Labels:       a.currentInfo.Labels,
+		Labels:       labels,
 		Status:       string(a.currentInfo.Status),
 		LastSeen:     time.Now(),
 	}
@@ -245,7 +263,12 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	// Close etcd registry
 	if err := a.registry.Close(); err != nil {
-		return fmt.Errorf("failed to close etcd registry: %w", err)
+		if strings.Contains(err.Error(), "requested lease not found") {
+			logger.Log.Debug("Ignoring lease not found error during shutdown")
+		} else {
+			logger.Log.Errorf("Error closing etcd registry: %v", err)
+			return fmt.Errorf("failed to close etcd registry: %w", err)
+		}
 	}
 
 	return nil
