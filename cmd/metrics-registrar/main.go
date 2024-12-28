@@ -174,7 +174,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	proxyAddr := fmt.Sprintf(":%d", cmd.Int("proxy-port"))
 	server := &http.Server{
 		Addr:    proxyAddr,
-		Handler: proxy.WithBasicAuth(reverseProxy, cfg.TargetAuth),
+		Handler: proxy.WithBasicAuth(reverseProxy, cfg.Password),
 	}
 
 	// Handle Akash port mapping for registration
