@@ -47,8 +47,23 @@ func NewApp(cfg *Config) (*App, error) {
 	return app, nil
 }
 
-// Start initializes and starts the registration service
+// Start initializes and starts the registration service asynchronously
 func (a *App) Start(ctx context.Context) error {
+	// Start async setup and registration
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		if err := a.setupAndRegister(ctx); err != nil {
+			logger.Log.Errorf("Setup and registration failed: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+// setupAndRegister handles the complete setup and registration process
+func (a *App) setupAndRegister(ctx context.Context) error {
+	// Setup etcd with retries
 	_, err := util.RetryOperation(func() (bool, error) {
 		err := a.setupEtcd()
 		return true, err
