@@ -36,7 +36,7 @@ func NewApp(cfg *Config) (*App, error) {
 
 	app := &App{
 		cfg:         cfg,
-		etcdLimiter: rate.NewLimiter(rate.Every(60*time.Second), 1), // Much more conservative rate limiting
+		etcdLimiter: rate.NewLimiter(rate.Every(5*time.Second), 3), // More balanced rate limiting
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -94,6 +94,7 @@ func (a *App) setupEtcd() error {
 }
 
 func (a *App) setupServiceGroup() error {
+	logger.Log.Infof("Creating/joining service group: %s", a.cfg.ServiceName)
 	group, err := a.registry.CreateOrJoinServiceGroup(a.ctx, a.cfg.ServiceName)
 	if err != nil {
 		return fmt.Errorf("failed to create/join service group: %w", err)
@@ -166,9 +167,15 @@ func (a *App) performInitialRegistration() error {
     // Register with retry
     _, err := util.RetryOperation(
         func() (bool, error) {
-            if err := a.etcdLimiter.Wait(a.ctx); err != nil {
-                return false, fmt.Errorf("rate limit exceeded: %w", err)
+            logger.Log.Debug("Checking registration rate limit")
+            reservation := a.etcdLimiter.Reserve()
+            if !reservation.OK() {
+                logger.Log.Debug("Rate limit would exceed, waiting...")
+                if err := a.etcdLimiter.Wait(a.ctx); err != nil {
+                    return false, fmt.Errorf("rate limit exceeded: %w", err)
+                }
             }
+            logger.Log.Debug("Rate limit check passed")
 
             done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
             if err != nil {
