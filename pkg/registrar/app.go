@@ -179,35 +179,19 @@ func (a *App) performInitialRegistration() error {
         LastSeen:     time.Now(),
     }
 
-    // Register with retry
-    _, err := util.RetryOperation(
-        func() (bool, error) {
-            logger.Log.Debug("Checking registration rate limit")
-            reservation := a.etcdLimiter.Reserve()
-            if !reservation.OK() {
-                logger.Log.Debug("Rate limit would exceed, waiting...")
-                if err := a.etcdLimiter.Wait(a.ctx); err != nil {
-                    return false, fmt.Errorf("rate limit exceeded: %w", err)
-                }
-            }
-            logger.Log.Debug("Rate limit check passed")
-
-            done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
-            if err != nil {
-                return false, fmt.Errorf("registration failed: %w", err)
-            }
-
-            a.regDone = done
-            a.regErrChan = errChan
-            return true, nil
-        },
-        util.RegistrationRetry,
-        uint(a.cfg.RetryAttempts),
-    )
-
-    if err != nil {
-        return fmt.Errorf("initial registration failed after retries: %w", err)
+    // Single registration attempt with rate limiting
+    if err := a.etcdLimiter.Wait(a.ctx); err != nil {
+        return fmt.Errorf("rate limit exceeded: %w", err)
     }
+
+    done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
+    if err != nil {
+        logger.Log.Warnf("Registration failed: %v", err)
+        return err
+    }
+
+    a.regDone = done
+    a.regErrChan = errChan
 
     logger.Log.Info("Initial registration successful")
     return nil
