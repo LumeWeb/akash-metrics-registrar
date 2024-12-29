@@ -13,8 +13,10 @@ type Config struct {
 	EtcdPassword  string
 	EtcdTimeout   time.Duration
 
-	// Target exporter configuration
-	TargetURL      string
+	// Target configuration
+	TargetHost     string
+	TargetPort     int
+	TargetPath     string
 	ServiceName    string
 	ExporterType   string
 	CustomLabels   map[string]string
@@ -22,12 +24,13 @@ type Config struct {
 	Password       string // Password for basic auth, used in ServiceGroupSpec
 
 	// Optional settings
-	RetryAttempts int
-	RetryDelay    time.Duration
+	RetryAttempts  int
+	RetryDelay     time.Duration
 
 	// Proxy configuration
-	DisableProxy bool              // Whether to disable proxy (default: false)
-	MetricsPort  int               // Port for metrics server
+	DisableProxy   bool  // Whether to disable proxy (default: false)
+	MetricsPort    int   // Port for metrics server
+	ExternalPort   int   // Akash external port if available
 }
 
 // ServiceStatus represents the current state of the service

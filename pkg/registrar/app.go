@@ -77,9 +77,15 @@ func (a *App) setupAndRegister(ctx context.Context) error {
 	}
 
 	// Initialize registration info
+	targetURL := fmt.Sprintf("http://%s:%d%s", 
+		a.cfg.TargetHost,
+		a.cfg.TargetPort,
+		a.cfg.TargetPath,
+	)
+	
 	a.currentInfo = RegistrationInfo{
 		ID:     fmt.Sprintf("%s-%d", a.cfg.ServiceName, time.Now().Unix()),
-		URL:    a.cfg.TargetURL,
+		URL:    targetURL,
 		Labels: a.cfg.CustomLabels,
 		Status: StatusStarting,
 	}
@@ -134,7 +140,12 @@ func (a *App) startHealthCheck() {
 }
 
 func (a *App) checkHealth() error {
-	req, err := http.NewRequest("GET", a.cfg.TargetURL, nil)
+	targetURL := fmt.Sprintf("http://%s:%d%s", 
+		a.cfg.TargetHost,
+		a.cfg.TargetPort,
+		a.cfg.TargetPath,
+	)
+	req, err := http.NewRequest("GET", targetURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -167,7 +178,13 @@ func (a *App) performInitialRegistration() error {
 	labels["deployment_id"] = identifiers.DeploymentID
 	labels["hash_id"] = identifiers.HashID
 	labels["ingress_host"] = ingressHost
-	labels["address"] = a.cfg.TargetURL
+	
+	// Use external port if available, otherwise use metrics port
+	port := a.cfg.MetricsPort
+	if a.cfg.ExternalPort > 0 {
+		port = a.cfg.ExternalPort
+	}
+	labels["address"] = fmt.Sprintf("%s:%d", ingressHost, port)
 
 	node := types.Node{
 		ID:           identifiers.HashID,
@@ -212,7 +229,12 @@ func (a *App) updateStatus(status ServiceStatus) error {
 	labels["deployment_id"] = identifiers.DeploymentID
 	labels["hash_id"] = identifiers.HashID
 	labels["ingress_host"] = ingressHost
-	labels["address"] = a.cfg.TargetURL
+	// Use external port if available, otherwise use target port
+	port := a.cfg.TargetPort
+	if a.cfg.ExternalPort > 0 {
+		port = a.cfg.ExternalPort
+	}
+	labels["address"] = fmt.Sprintf("%s:%d", a.cfg.TargetHost, port)
 
 	node := types.Node{
 		ID:           identifiers.HashID,

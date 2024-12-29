@@ -12,6 +12,7 @@ import (
 	"go.lumeweb.com/akash-metrics-registrar/pkg/registrar"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -144,14 +145,10 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	targetURL := fmt.Sprintf("http://%s:%d%s",
-		cmd.String("target-host"),
-		cmd.Int("target-port"),
-		cmd.String("target-path"),
-	)
-
 	cfg := &registrar.Config{
-		TargetURL:       targetURL,
+		TargetHost:      cmd.String("target-host"),
+		TargetPort:      int(cmd.Int("target-port")),
+		TargetPath:      cmd.String("target-path"),
 		ServiceName:     cmd.String("service-name"),
 		ExporterType:    cmd.String("exporter-type"),
 		EtcdEndpoints:   []string{cmd.String("etcd-endpoints")},
@@ -179,7 +176,9 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	// Setup proxy unless disabled
 	if !cfg.DisableProxy {
 		proxyConfig := proxy.Config{
-			TargetURL:     targetURL,
+			TargetHost:    cfg.TargetHost,
+			TargetPort:    cfg.TargetPort,
+			TargetPath:    cfg.TargetPath,
 			FlushInterval: 5 * time.Second,
 		}
 
@@ -200,26 +199,14 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		logger.Log.Info("Proxy server disabled")
 	}
 
-	// Handle Akash port mapping for registration
-	registrationPort := fmt.Sprintf("%d", cmd.Int("metrics-port"))
-	akashPortVar := fmt.Sprintf("AKASH_EXTERNAL_PORT_%d", cmd.Int("metrics-port"))
+	// Handle Akash port mapping
+	akashPortVar := fmt.Sprintf("AKASH_EXTERNAL_PORT_%d", cfg.MetricsPort)
 	if akashPort := os.Getenv(akashPortVar); akashPort != "" {
-		logger.Log.Infof("Found Akash external port mapping: %s - will use for registration", akashPort)
-		registrationPort = akashPort
+		if port, err := strconv.Atoi(akashPort); err == nil {
+			logger.Log.Infof("Found Akash external port mapping: %d", port)
+			cfg.ExternalPort = port
+		}
 	}
-
-	// Get Akash ingress host if available
-	akashIngressHost := os.Getenv("AKASH_INGRESS_HOST")
-	if akashIngressHost == "" {
-		akashIngressHost = "localhost"
-	}
-
-	// Update registration URL to use proxy address with Akash configuration
-	cfg.TargetURL = fmt.Sprintf("http://%s:%s%s",
-		akashIngressHost,
-		registrationPort,
-		cmd.String("target-path"),
-	)
 
 	// Start HTTP server
 	go func() {
