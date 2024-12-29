@@ -23,6 +23,7 @@ func NewMetricsProxy(cfg Config) (*httputil.ReverseProxy, error) {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			pr.Out.URL.Path = pr.In.URL.Path
 			pr.SetXForwarded()
 		},
 		FlushInterval: cfg.FlushInterval,
