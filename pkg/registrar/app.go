@@ -77,12 +77,12 @@ func (a *App) setupAndRegister(ctx context.Context) error {
 	}
 
 	// Initialize registration info
-	targetURL := fmt.Sprintf("http://%s:%d%s", 
+	targetURL := fmt.Sprintf("http://%s:%d%s",
 		a.cfg.TargetHost,
 		a.cfg.TargetPort,
 		a.cfg.TargetPath,
 	)
-	
+
 	a.currentInfo = RegistrationInfo{
 		ID:     fmt.Sprintf("%s-%d", a.cfg.ServiceName, time.Now().Unix()),
 		URL:    targetURL,
@@ -140,7 +140,7 @@ func (a *App) startHealthCheck() {
 }
 
 func (a *App) checkHealth() error {
-	targetURL := fmt.Sprintf("http://%s:%d%s", 
+	targetURL := fmt.Sprintf("http://%s:%d%s",
 		a.cfg.TargetHost,
 		a.cfg.TargetPort,
 		a.cfg.TargetPath,
@@ -178,7 +178,7 @@ func (a *App) performInitialRegistration() error {
 	labels["deployment_id"] = identifiers.DeploymentID
 	labels["hash_id"] = identifiers.HashID
 	labels["ingress_host"] = ingressHost
-	
+
 	// Use external port if available, otherwise use metrics port
 	port := a.cfg.MetricsPort
 	if a.cfg.ExternalPort > 0 {
@@ -186,10 +186,16 @@ func (a *App) performInitialRegistration() error {
 	}
 	labels["address"] = fmt.Sprintf("%s:%d", ingressHost, port)
 
+	// Use external port if available, otherwise use metrics port
+	port = a.cfg.MetricsPort
+	if a.cfg.ExternalPort > 0 {
+		port = a.cfg.ExternalPort
+	}
+
 	node := types.Node{
 		ID:           identifiers.HashID,
 		ExporterType: a.cfg.ExporterType,
-		Port:         a.cfg.MetricsPort,
+		Port:         port,
 		MetricsPath:  "/metrics",
 		Labels:       labels,
 		Status:       string(StatusStarting),
@@ -236,10 +242,16 @@ func (a *App) updateStatus(status ServiceStatus) error {
 	}
 	labels["address"] = fmt.Sprintf("%s:%d", a.cfg.TargetHost, port)
 
+	// Use external port if available, otherwise use metrics port
+	port = a.cfg.MetricsPort
+	if a.cfg.ExternalPort > 0 {
+		port = a.cfg.ExternalPort
+	}
+
 	node := types.Node{
 		ID:           identifiers.HashID,
 		ExporterType: a.cfg.ExporterType,
-		Port:         a.cfg.MetricsPort,
+		Port:         port,
 		MetricsPath:  "/metrics",
 		Labels:       labels,
 		Status:       string(status),
