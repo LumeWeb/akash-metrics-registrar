@@ -107,6 +107,12 @@ func main() {
 				Sources:  cli.EnvVars("METRICS_PASSWORD"),
 			},
 			&cli.StringFlag{
+				Name:     "exporter-type",
+				Usage:    "Type of metrics exporter",
+				Value:    "metrics_exporter",
+				Sources:  cli.EnvVars("EXPORTER_TYPE"),
+			},
+			&cli.StringFlag{
 				Name:    "custom-labels",
 				Usage:   "JSON string of custom labels",
 				Sources: cli.EnvVars("CUSTOM_LABELS"),
@@ -141,6 +147,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	cfg := &registrar.Config{
 		TargetURL:       targetURL,
 		ServiceName:     cmd.String("service-name"),
+		ExporterType:    cmd.String("exporter-type"),
 		EtcdEndpoints:   []string{cmd.String("etcd-endpoints")},
 		EtcdPrefix:      cmd.String("etcd-prefix"),
 		EtcdUsername:    cmd.String("etcd-username"),
