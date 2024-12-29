@@ -5,7 +5,7 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 # Copy the built executable
-COPY ./metrics-registrar /usr/bin/akash-metrics-registrar
+COPY ./akash-metrics-registrar /usr/bin/metrics-registrar
 
 # Command to run the executable
 ENTRYPOINT ["akash-metrics-registrar"]
