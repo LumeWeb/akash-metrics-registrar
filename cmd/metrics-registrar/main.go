@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"github.com/urfave/cli/v3"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/build"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/logger"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/proxy"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/registrar"
+	"net/http"
 	"os"
 	"time"
 )

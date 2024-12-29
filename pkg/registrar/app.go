@@ -6,12 +6,11 @@ import (
 	"go.lumeweb.com/akash-metrics-registrar/pkg/build"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/logger"
 	"go.lumeweb.com/akash-metrics-registrar/pkg/util"
-	"os"
-	"strings"
 	etcdregistry "go.lumeweb.com/etcd-registry"
 	"go.lumeweb.com/etcd-registry/types"
 	"golang.org/x/time/rate"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -37,7 +36,7 @@ func NewApp(cfg *Config) (*App, error) {
 
 	app := &App{
 		cfg:         cfg,
-		etcdLimiter: rate.NewLimiter(rate.Every(5*time.Second), 3),
+		etcdLimiter: rate.NewLimiter(rate.Every(60*time.Second), 1), // Much more conservative rate limiting
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -61,9 +60,6 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.setupServiceGroup(); err != nil {
 		return fmt.Errorf("service group setup failed: %w", err)
 	}
-
-	// Start health checking
-	a.startHealthCheck()
 
 	return nil
 }
@@ -104,53 +100,8 @@ func (a *App) setupServiceGroup() error {
 }
 
 func (a *App) startHealthCheck() {
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-
-		// Initial registration
-		if err := a.performInitialRegistration(); err != nil {
-			logger.Log.Errorf("Initial registration failed: %v", err)
-			return
-		}
-
-		healthTicker := time.NewTicker(a.cfg.RegistrationTTL / 2)
-		defer healthTicker.Stop()
-
-		currentStatus := StatusHealthy
-		for {
-			select {
-			case <-healthTicker.C:
-				if err := a.checkHealth(); err != nil {
-					logger.Log.Errorf("Health check failed: %v", err)
-					if currentStatus != StatusDegraded {
-						if err := a.updateStatus(StatusDegraded); err != nil {
-							logger.Log.Errorf("Failed to update degraded status: %v", err)
-						}
-						currentStatus = StatusDegraded
-					}
-				} else if currentStatus != StatusHealthy {
-					if err := a.updateStatus(StatusHealthy); err != nil {
-						logger.Log.Errorf("Failed to update healthy status: %v", err)
-					}
-					currentStatus = StatusHealthy
-				}
-			case <-a.regDone:
-				// Registration expired, need to re-register
-				if err := a.performInitialRegistration(); err != nil {
-					logger.Log.Errorf("Re-registration failed: %v", err)
-				}
-			case err := <-a.regErrChan:
-				logger.Log.Errorf("Registration error: %v", err)
-				// Attempt to re-register after error
-				if err := a.performInitialRegistration(); err != nil {
-					logger.Log.Errorf("Re-registration failed: %v", err)
-				}
-			case <-a.ctx.Done():
-				return
-			}
-		}
-	}()
+	// Health check disabled to reduce lease operations
+	logger.Log.Info("Health check disabled - relying on TTL for status management")
 }
 
 func (a *App) checkHealth() error {
@@ -158,7 +109,6 @@ func (a *App) checkHealth() error {
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -242,33 +192,23 @@ func (a *App) Shutdown(ctx context.Context) error {
 	// Cancel context to stop health checks
 	a.cancel()
 
-	// Update status to shutdown
-	if err := a.updateStatus(StatusShutdown); err != nil {
-		logger.Log.Errorf("Failed to update shutdown status: %v", err)
+	// Simply close registry without cleanup
+	if a.registry != nil {
+		a.registry.Close()
 	}
 
-	// Wait for goroutines with timeout
-	done := make(chan struct{})
+	// Wait for goroutines with short timeout
+	waitCh := make(chan struct{})
 	go func() {
 		a.wg.Wait()
-		close(done)
+		close(waitCh)
 	}()
 
 	select {
-	case <-done:
-		logger.Log.Info("All goroutines completed")
-	case <-ctx.Done():
-		return fmt.Errorf("shutdown timed out")
-	}
-
-	// Close etcd registry
-	if err := a.registry.Close(); err != nil {
-		if strings.Contains(err.Error(), "requested lease not found") {
-			logger.Log.Debug("Ignoring lease not found error during shutdown")
-		} else {
-			logger.Log.Errorf("Error closing etcd registry: %v", err)
-			return fmt.Errorf("failed to close etcd registry: %w", err)
-		}
+	case <-waitCh:
+		logger.Log.Info("Clean shutdown completed")
+	case <-time.After(5 * time.Second):
+		logger.Log.Warn("Shutdown timed out waiting for goroutines")
 	}
 
 	return nil
