@@ -44,10 +44,10 @@ func main() {
 				Sources: cli.EnvVars("TARGET_PORT"),
 			},
 			&cli.IntFlag{
-				Name:    "proxy-port",
+				Name:    "metrics-port",
 				Value:   8080,
-				Usage:   "Port for the proxy server",
-				Sources: cli.EnvVars("PROXY_PORT"),
+				Usage:   "Port for the metrics server",
+				Sources: cli.EnvVars("METRICS_PORT"),
 			},
 			&cli.StringFlag{
 				Name:     "service-name",
@@ -165,7 +165,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		CustomLabels:    customLabels,
 		Password:        cmd.String("metrics-password"),
 		DisableProxy:    cmd.Bool("disable-proxy"),
-		ProxyPort:       int(cmd.Int("proxy-port")),
+		MetricsPort:     int(cmd.Int("metrics-port")),
 	}
 
 	// Create new registrar app
@@ -189,20 +189,20 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		}
 
 		// Setup HTTP server with proxy
-		proxyAddr := fmt.Sprintf(":%d", cfg.ProxyPort)
+		metricsAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
 		server = &http.Server{
-			Addr:    proxyAddr,
+			Addr:    metricsAddr,
 			Handler: proxy.WithBasicAuth(reverseProxy, cfg.Password),
 		}
 
-		logger.Log.Infof("Starting proxy server on port %d", cfg.ProxyPort)
+		logger.Log.Infof("Starting metrics server on port %d", cfg.MetricsPort)
 	} else {
 		logger.Log.Info("Proxy server disabled")
 	}
 
 	// Handle Akash port mapping for registration
-	registrationPort := fmt.Sprintf("%d", cmd.Int("proxy-port"))
-	akashPortVar := fmt.Sprintf("AKASH_EXTERNAL_PORT_%d", cmd.Int("proxy-port"))
+	registrationPort := fmt.Sprintf("%d", cmd.Int("metrics-port"))
+	akashPortVar := fmt.Sprintf("AKASH_EXTERNAL_PORT_%d", cmd.Int("metrics-port"))
 	if akashPort := os.Getenv(akashPortVar); akashPort != "" {
 		logger.Log.Infof("Found Akash external port mapping: %s - will use for registration", akashPort)
 		registrationPort = akashPort

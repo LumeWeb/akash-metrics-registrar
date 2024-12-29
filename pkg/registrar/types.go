@@ -27,7 +27,7 @@ type Config struct {
 
 	// Proxy configuration
 	DisableProxy bool              // Whether to disable proxy (default: false)
-	ProxyPort    int               // Port for proxy server
+	MetricsPort  int               // Port for metrics server
 }
 
 // ServiceStatus represents the current state of the service

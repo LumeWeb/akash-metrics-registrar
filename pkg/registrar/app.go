@@ -153,104 +153,104 @@ func (a *App) checkHealth() error {
 }
 
 func (a *App) performInitialRegistration() error {
-    // Get Akash identifiers
-    ingressHost := os.Getenv("AKASH_INGRESS_HOST")
-    identifiers := util.GetNodeIdentifiers(ingressHost)
+	// Get Akash identifiers
+	ingressHost := os.Getenv("AKASH_INGRESS_HOST")
+	identifiers := util.GetNodeIdentifiers(ingressHost)
 
-    // Add standard Akash and version labels
-    labels := make(map[string]string)
-    for k, v := range a.currentInfo.Labels {
-        labels[k] = v
-    }
-    labels["version"] = build.Version
-    labels["git_commit"] = build.GitCommit
-    labels["deployment_id"] = identifiers.DeploymentID
-    labels["hash_id"] = identifiers.HashID
-    labels["ingress_host"] = ingressHost
-    labels["address"] = a.cfg.TargetURL
+	// Add standard Akash and version labels
+	labels := make(map[string]string)
+	for k, v := range a.currentInfo.Labels {
+		labels[k] = v
+	}
+	labels["version"] = build.Version
+	labels["git_commit"] = build.GitCommit
+	labels["deployment_id"] = identifiers.DeploymentID
+	labels["hash_id"] = identifiers.HashID
+	labels["ingress_host"] = ingressHost
+	labels["address"] = a.cfg.TargetURL
 
-    node := types.Node{
-        ID:           identifiers.HashID,
-        ExporterType: a.cfg.ExporterType,
-        Port:         0, // Not used for this exporter
-        MetricsPath:  "/metrics",
-        Labels:       labels,
-        Status:       string(StatusStarting),
-        LastSeen:     time.Now(),
-    }
+	node := types.Node{
+		ID:           identifiers.HashID,
+		ExporterType: a.cfg.ExporterType,
+		Port:         a.cfg.MetricsPort,
+		MetricsPath:  "/metrics",
+		Labels:       labels,
+		Status:       string(StatusStarting),
+		LastSeen:     time.Now(),
+	}
 
-    // Single registration attempt with rate limiting
-    if err := a.etcdLimiter.Wait(a.ctx); err != nil {
-        return fmt.Errorf("rate limit exceeded: %w", err)
-    }
+	// Single registration attempt with rate limiting
+	if err := a.etcdLimiter.Wait(a.ctx); err != nil {
+		return fmt.Errorf("rate limit exceeded: %w", err)
+	}
 
-    done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
-    if err != nil {
-        logger.Log.Warnf("Registration failed: %v", err)
-        return err
-    }
+	done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
+	if err != nil {
+		logger.Log.Warnf("Registration failed: %v", err)
+		return err
+	}
 
-    a.regDone = done
-    a.regErrChan = errChan
+	a.regDone = done
+	a.regErrChan = errChan
 
-    logger.Log.Info("Initial registration successful")
-    return nil
+	logger.Log.Info("Initial registration successful")
+	return nil
 }
 
 func (a *App) updateStatus(status ServiceStatus) error {
-    // Get current node info
-    ingressHost := os.Getenv("AKASH_INGRESS_HOST")
-    identifiers := util.GetNodeIdentifiers(ingressHost)
+	// Get current node info
+	ingressHost := os.Getenv("AKASH_INGRESS_HOST")
+	identifiers := util.GetNodeIdentifiers(ingressHost)
 
-    // Add standard Akash and version labels
-    labels := make(map[string]string)
-    for k, v := range a.currentInfo.Labels {
-        labels[k] = v
-    }
-    labels["version"] = build.Version
-    labels["git_commit"] = build.GitCommit
-    labels["deployment_id"] = identifiers.DeploymentID
-    labels["hash_id"] = identifiers.HashID
-    labels["ingress_host"] = ingressHost
-    labels["address"] = a.cfg.TargetURL
+	// Add standard Akash and version labels
+	labels := make(map[string]string)
+	for k, v := range a.currentInfo.Labels {
+		labels[k] = v
+	}
+	labels["version"] = build.Version
+	labels["git_commit"] = build.GitCommit
+	labels["deployment_id"] = identifiers.DeploymentID
+	labels["hash_id"] = identifiers.HashID
+	labels["ingress_host"] = ingressHost
+	labels["address"] = a.cfg.TargetURL
 
-    node := types.Node{
-        ID:           identifiers.HashID,
-        ExporterType: a.cfg.ExporterType,
-        Port:         0, // Not used for this exporter
-        MetricsPath:  "/metrics",
-        Labels:       labels,
-        Status:       string(status),
-        LastSeen:     time.Now(),
-    }
+	node := types.Node{
+		ID:           identifiers.HashID,
+		ExporterType: a.cfg.ExporterType,
+		Port:         a.cfg.MetricsPort,
+		MetricsPath:  "/metrics",
+		Labels:       labels,
+		Status:       string(status),
+		LastSeen:     time.Now(),
+	}
 
-    // Update with retry
-    _, err := util.RetryOperation(
-        func() (bool, error) {
-            if err := a.etcdLimiter.Wait(a.ctx); err != nil {
-                return false, fmt.Errorf("rate limit exceeded: %w", err)
-            }
+	// Update with retry
+	_, err := util.RetryOperation(
+		func() (bool, error) {
+			if err := a.etcdLimiter.Wait(a.ctx); err != nil {
+				return false, fmt.Errorf("rate limit exceeded: %w", err)
+			}
 
-            done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
-            if err != nil {
-                return false, fmt.Errorf("status update failed: %w", err)
-            }
+			done, errChan, err := a.group.RegisterNode(a.ctx, node, a.cfg.RegistrationTTL)
+			if err != nil {
+				return false, fmt.Errorf("status update failed: %w", err)
+			}
 
-            a.regDone = done
-            a.regErrChan = errChan
-            return true, nil
-        },
-        util.StatusRetry,
-        uint(a.cfg.RetryAttempts),
-    )
+			a.regDone = done
+			a.regErrChan = errChan
+			return true, nil
+		},
+		util.StatusRetry,
+		uint(a.cfg.RetryAttempts),
+	)
 
-    if err != nil {
-        return fmt.Errorf("status update failed after retries: %w", err)
-    }
+	if err != nil {
+		return fmt.Errorf("status update failed after retries: %w", err)
+	}
 
-    a.currentInfo.Status = status
-    a.currentInfo.LastChecked = time.Now()
-    return nil
+	a.currentInfo.Status = status
+	a.currentInfo.LastChecked = time.Now()
+	return nil
 }
 
 // Shutdown gracefully stops the registration service
