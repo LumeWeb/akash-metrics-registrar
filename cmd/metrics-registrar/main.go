@@ -107,10 +107,16 @@ func main() {
 				Sources:  cli.EnvVars("METRICS_PASSWORD"),
 			},
 			&cli.StringFlag{
-				Name:     "exporter-type",
-				Usage:    "Type of metrics exporter",
-				Value:    "metrics_exporter",
-				Sources:  cli.EnvVars("EXPORTER_TYPE"),
+				Name:    "exporter-type",
+				Usage:   "Type of metrics exporter",
+				Value:   "metrics_exporter",
+				Sources: cli.EnvVars("EXPORTER_TYPE"),
+			},
+			&cli.BoolFlag{
+				Name:    "disable-proxy",
+				Usage:   "Disable proxy server",
+				Value:   false,
+				Sources: cli.EnvVars("DISABLE_PROXY"),
 			},
 			&cli.StringFlag{
 				Name:    "custom-labels",
@@ -158,6 +164,8 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		RetryDelay:      cmd.Duration("retry-delay"),
 		CustomLabels:    customLabels,
 		Password:        cmd.String("metrics-password"),
+		DisableProxy:    cmd.Bool("disable-proxy"),
+		ProxyPort:       int(cmd.Int("proxy-port")),
 	}
 
 	// Create new registrar app
@@ -166,22 +174,30 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("failed to create app: %w", err)
 	}
 
-	// Setup proxy
-	proxyConfig := proxy.Config{
-		TargetURL:     targetURL,
-		FlushInterval: 5 * time.Second,
-	}
+	var server *http.Server
 
-	reverseProxy, err := proxy.NewMetricsProxy(proxyConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create proxy: %w", err)
-	}
+	// Setup proxy unless disabled
+	if !cfg.DisableProxy {
+		proxyConfig := proxy.Config{
+			TargetURL:     targetURL,
+			FlushInterval: 5 * time.Second,
+		}
 
-	// Setup HTTP server with proxy
-	proxyAddr := fmt.Sprintf(":%d", cmd.Int("proxy-port"))
-	server := &http.Server{
-		Addr:    proxyAddr,
-		Handler: proxy.WithBasicAuth(reverseProxy, cfg.Password),
+		reverseProxy, err := proxy.NewMetricsProxy(proxyConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create proxy: %w", err)
+		}
+
+		// Setup HTTP server with proxy
+		proxyAddr := fmt.Sprintf(":%d", cfg.ProxyPort)
+		server = &http.Server{
+			Addr:    proxyAddr,
+			Handler: proxy.WithBasicAuth(reverseProxy, cfg.Password),
+		}
+
+		logger.Log.Infof("Starting proxy server on port %d", cfg.ProxyPort)
+	} else {
+		logger.Log.Info("Proxy server disabled")
 	}
 
 	// Handle Akash port mapping for registration

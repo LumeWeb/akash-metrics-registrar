@@ -24,6 +24,10 @@ type Config struct {
 	// Optional settings
 	RetryAttempts int
 	RetryDelay    time.Duration
+
+	// Proxy configuration
+	DisableProxy bool              // Whether to disable proxy (default: false)
+	ProxyPort    int               // Port for proxy server
 }
 
 // ServiceStatus represents the current state of the service
