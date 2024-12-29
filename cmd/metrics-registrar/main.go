@@ -53,7 +53,7 @@ func main() {
 				Name:     "service-name",
 				Usage:    "Name of the service for registration",
 				Required: true,
-				Sources:  cli.EnvVars("SERVICE_NAME"),
+				Sources:  cli.EnvVars("METRICS_SERVICE_NAME"),
 			},
 			&cli.StringFlag{
 				Name:     "etcd-endpoints",
